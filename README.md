@@ -51,3 +51,18 @@ Examples:
 * <code>Nico Rosberg</code> => <code>Nrosberg</code>
 * <code>Daniel Day-Lewis</code> => <code>Dlewis</code>
 * <code>D'angelo Russel</code> when Drussel is taken => <code>Darussel</code>
+
+### Repeat name conflicts in user deletion ###
+
+When deleting users, you are first prompted to select the OU the users reside in. The search is recursive, so you may specify higher level OUs, or even the entire domain and search the entire directory. As a result, when listing a common Firstname + Lastname for deletion, the search may return multiple users with the same Firstname + Lastname. When such a conflict is detected, all matching users will be listed and you will be prompted to select the intended deletion target.
+
+To assist you in determining the true intended target, the script will print some identifying information:
+
+<code>
+Index Name            OU           Account    LastLogon
+----- ----            --           -------    ---------
+    0 Lewis Hamilton  /Users       Lehamilton 9/2/2016 5:07:46 PM
+    1 Lewis Hamilton  /TempTest    Lhamilton  12/31/1600 7:00:00 PM
+
+Enter index or indeces to delete: 
+</code>
