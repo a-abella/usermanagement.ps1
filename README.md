@@ -53,6 +53,7 @@ Examples:
 * <code>Paul di_Resta</code> => <code>Presta</code>
 * <code>Nico Rosberg</code> => <code>Nrosberg</code>
 * <code>Daniel Day-Lewis</code> => <code>Dlewis</code>
+* <code>Jenson Button</code> when Jbutton is taken => <code>Jebutton</code>
 * <code>D'angelo Russel</code> when Drussel is taken => <code>Darussel</code>
 
 ### Repeat name conflicts in user deletion ###
