@@ -1,5 +1,7 @@
 # usermanagement.ps1
-Create/delete Active Directory user accounts with no annoying CSV preformatted user lists. Just feed it properly formatted names, enter their OU, and let it do all the work. Also support creating new Exchange mailboxes for new user accounts. User deletions do no clean up disconnected mailboxes because we do that as a scheduled task on the Exchange server.
+Create/delete Active Directory user accounts with no annoying CSV preformatted user lists. Just feed it properly formatted names, enter their OU, and let it do all the work. New valid usernames are generated on-demand. Also support creating new Exchange mailboxes for new user accounts. 
+
+User deletions do not clean up disconnected mailboxes because we do that as a scheduled task on the Exchange server. Also does not clean up roaming profile directories, handle security group membership, or Exchange distribution list membership.
 
 Function 'Choose-ADOrganizationalUnit' credited to Mica H: https://itmicah.wordpress.com/2016/03/29/active-directory-ou-picker-revisited/
 
