@@ -58,11 +58,15 @@ When deleting users, you are first prompted to select the OU the users reside in
 
 To assist you in determining the true intended target, the script will print some identifying information:
 
-<code>
-Index Name            OU           Account    LastLogon
+```
+Multiples of the same name have been found.
 
+Index Name            OU           Account    LastLogon
+----- ----            --           -------    ---------
     0 Lewis Hamilton  /Users       Lehamilton 9/2/2016 5:07:46 PM
     1 Lewis Hamilton  /TempTest    Lhamilton  12/31/1600 7:00:00 PM
 
 Enter index or indeces to delete: 
-</code>
+```
+
+OU is the Oganizational Unit where the user object resides, and LastLogon is an [estimate (+/- 1 week)](https://blogs.technet.microsoft.com/askds/2009/04/15/the-lastlogontimestamp-attribute-what-it-was-designed-for-and-how-it-works/) of the last time the user autenticated against a Domain Controller. A LastLogon timestamp of <code>12/31/1600 7:00:00 PM</code> indicates that the user account has never been logged in to.
