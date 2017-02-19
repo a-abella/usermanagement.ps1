@@ -7,6 +7,7 @@ Function 'Choose-ADOrganizationalUnit' credited to Mica H: https://itmicah.wordp
 
 ## Requirements ##
 1. Powershell 3.0 (default on Windows 8 and up).
+2. MicaH's Choose-ADOrganizationalUnit function in a dot-sourceable file.
 2. Script must run from a PC on the same domain the users are being created in.
 3. Script will require domain admin creds. Will prompt for credentials via Get-Credential frame.
 4. Remote DC and Exchange servers will need PS-Remoting enabled.
