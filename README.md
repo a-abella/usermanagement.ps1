@@ -60,7 +60,7 @@ To assist you in determining the true intended target, the script will print som
 
 <code>
 Index Name            OU           Account    LastLogon
------ ----            --           -------    ---------
+
     0 Lewis Hamilton  /Users       Lehamilton 9/2/2016 5:07:46 PM
     1 Lewis Hamilton  /TempTest    Lhamilton  12/31/1600 7:00:00 PM
 
