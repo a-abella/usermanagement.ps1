@@ -19,8 +19,8 @@ Go through the script and edit the following lines to match your environment:
 * <code>Line 21, 237</code>: Your email domain.
 * <code>Line 128, 290</code>: The FQDN of the Domain Controller you will establish a PS Remote session to.
 * <code>Line 214</code>: The FQDN of the Exchange server you will establish a PS Remote session to.
-* <code>Line 329, 352, 401, 424</code>: Your domain and tld LDAP object names.
 * <code>Line 218</code>: A leading substring of your Mailbox Database(s) name(s).
+* <code>Line 329, 352, 401, 424</code>: Your domain and tld LDAP object names.
 
 ## Usage ##
 
