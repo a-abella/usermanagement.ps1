@@ -73,3 +73,9 @@ Enter index or indeces to delete:
 ```
 
 OU is the Oganizational Unit where the user object resides, and LastLogon is an [estimate (+/- 1 week)](https://blogs.technet.microsoft.com/askds/2009/04/15/the-lastlogontimestamp-attribute-what-it-was-designed-for-and-how-it-works/) of the last time the user autenticated against a Domain Controller. A LastLogon timestamp of <code>12/31/1600 7:00:00 PM</code> indicates that the user account has never been logged in to.
+
+## To-Do ##
+
+1. Prompt to add security groups for new accounts.
+2. Prompt after mailbox creation for distribution list membership.
+3. Clean up Roaming Profiles and/or folder redirection locations on user deletion.
