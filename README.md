@@ -12,15 +12,7 @@ Function 'Choose-ADOrganizationalUnit' credited to Mica H: https://itmicah.wordp
 3. Script will require domain admin creds. Will prompt for credentials via Get-Credential frame.
 4. Remote DC and Exchange servers will need PS-Remoting enabled.
 
-Go through the script and edit the following lines to match your environment:
-
-* <code>Line 16</code>: Path to MicaH's Choose-ADOrganizationalUnit file.
-* <code>Line 20, 252</code>: Your default user acount password.
-* <code>Line 21, 237</code>: Your email domain.
-* <code>Line 128, 290</code>: The FQDN of the Domain Controller you will establish a PS Remote session to.
-* <code>Line 214</code>: The FQDN of the Exchange server you will establish a PS Remote session to.
-* <code>Line 218</code>: A leading substring of your Mailbox Database(s) name(s).
-* <code>Line 329, 352, 401, 424</code>: Your domain and tld LDAP object names.
+At the top of the file you will find a dot-sourced path to Choose-ADOrganizationalUnit.ps1 which should be specified, and lines 13-18 contain various environment-specific variables to be modified.
 
 ## Usage ##
 
