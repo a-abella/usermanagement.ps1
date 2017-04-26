@@ -1,24 +1,22 @@
-<# User Management Script
- Antonio Abella
- 6/24/2016
+# User Management Script
+# Antonio Abella
+# 6/24/2016
+#
+# Function 'Choose-ADOrganizationalUnit' credited to Mica H
+# https://itmicah.wordpress.com/2016/03/29/active-directory-ou-picker-revisited/
 
- Create/delete Active Directory user accounts with no annoying CSV preformatted user lists.
- Just feed it properly formatted names, enter their OU, and let it do all the work. Also support
- creating new Exchange mailboxes for new user accounts. User deletions do no clean up
- disconnected mailboxes because we do that as a scheduled task on the Exchange server.
+# Dot-source Choose-AD function file
+. \\path\to\file\Choose-ADOrganizationalUnit.ps1
 
- Function 'Choose-ADOrganizationalUnit' credited to Mica H
- https://itmicah.wordpress.com/2016/03/29/active-directory-ou-picker-revisited/
-#>
 
-# Dot-source file containing Choose-ADOrganizationalUnit
-# function.
-. .\path\to\ChooseADOrganizationalUnit.ps1
+# Configure settings for your environment
+$defaultpw = (ConvertTo-SecureString "PasswordHere" -AsPlainText -force)
+$emaildomain = "@corp.tld"
+$domainname = "corp"
+$tld = "tld"
+$remotedc = "domaincontroller.corp.tld"
+$exchangeUri = "http://exchange.corp.tld/PowerShell/"
 
-# Hold default password and domain
-# Edit these to suit your environment
-$defaultpw = (ConvertTo-SecureString "password-here" -AsPlainText -force)
-$emaildomain = '@domain.tld'
 
 clear
 
@@ -50,7 +48,6 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
     # Add names to array as they are entered if not empty string
     while ($entry -ne "") {
         $entry = Read-Host -Prompt 'Enter a name in format [First] [M] [Last]'
-
         if ($entry -ne "") {
             $strip = $entry.trim() -replace '\s+', ' '
             $nameArray += $strip
@@ -94,54 +91,55 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                     $nameArray[$_] = $fixedname
                 }
             }
-        } else {
-            clear
-            break
-        }
+        } else { clear; break }
+
         Write-Host "`nCorrected Names:`n"
+
         $nameArray | % {$index=0} {
             Write-Host "    $index  $_"
             $index++
         }
+
         $correct = Read-Host -Prompt "`nIs this correct? [Y/n]"
-        if (($correct -eq "Y") -or ($correct -eq "y") -or ($correct -eq "")) {
-            clear
-            break
-        }
+        if (($correct -eq "Y") -or ($correct -eq "y") -or ($correct -eq "")) { clear; break }
+
         clear
+
         Write-Host "`nCurrent Names:`n"
+
         $nameArray | % {$index=0} {
             Write-Host "    $index  $_"
             $index++
         }
+
     }
-    # Automated username generation
+
+    # Automatic username generation
     # Username convention:
     #   IF AVAILABLE: first initial concatinated with lowercase surname
     #   ELSE:         first two letters of first name concatinated with lowercase surname
     #   ELSE:         first three letters of first name... and so on and so forth
-    Write-Host "`nCreating Usernames...`n`n"
-
-    # Establish remote session to domain controller
-    # DC must have PowerShell remoting enabled
+   
+    # Establish remote session to primary DC
     $cred = Get-Credential -Credential $null
-    $s = New-PSSession -ComputerName domaincontroller.domain.tld -Credential $cred
+    $s = New-PSSession -ComputerName $remotedc -Credential $cred
     Invoke-Command -Session $s -Scriptblock {
         Import-Module ActiveDirectory -ErrorAction SilentlyContinue
 
-        # PS function [string]::IsNullOrWhitespace is not in PS version
-        # on our DC, so we make it ourselves
         function StringIsNullOrWhitespace([string] $string) {
             if ($string -ne $null) {
                 $string = $string.Trim()
             }
             return [string]::IsNullOrEmpty($string)
         }
+
+        Write-Host "`nCreating Usernames...`n`n"
+
         $usrarray = @()
         $userobjects = @()
+        $movedusers = @()
 
         # Grab name elements (first, mi, last)
-        # split first name to char array, iterate over it
         $using:nameArray | % { $i = 0 }{
             $username = ""
             $splitname = $_ -split " "
@@ -153,111 +151,172 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                 $minitial = $splitname[1]
             }
 
-            # for every char in array starting at index 0, concatinate it to last name
-            # check against Get-ADUser to see if username already exists
-            # if it does, add next letter in char array and check again
-            $fninitarray = @()
-            $fnarray = $firstname.ToCharArray()
-            foreach ($letter in $fnarray) {
-                if ($letter -ne "'") { $fninitarray += ,$letter }
-                $fninit = -join $fninitarray
-                $username = -join ($fninit, $($lastname.ToLower().split(" -")[-1] -replace "'",''))
-                $namecheck = $(Get-ADUser -Filter "samAccountName -like '$username'")
-                if (StringIsNullOrWhitespace($namecheck)){
-                    $usrarray += ,$username
-                    break
+            # Identify existing users with same firstname and lastname
+            $matching = @()
+            $matching += Get-ADUser -Filter "name -like '$($firstname -replace "'","''")*$($lastname -replace "'","''")'" -Properties canonicalname
+            if ($matching) {
+                Write-Host -NoNewline "`nFound similar user(s):`n" -BackgroundColor "yellow" -ForegroundColor "black"
+                $z = 0
+                $matching | % {
+                    Write-Host "  $z   $($_.name) - $($_.samaccountname) - $($_.canonicalname)"
+                    $z++
+                }
+                if ($matching.Length -gt 1) {
+                    $in = Read-Host -Prompt "`nDo you want to move one of these users to $($using:ou.name)?`nSelecting No will create a new user [Y/n]"
+                    if (([string]::Compare($in, 'y', $True) -eq 0) -or ([string]::Compare($in, 'yes', $True) -eq 0) -or ($in -eq "")) {
+                        $whichOne = Read-Host -Prompt "`nSelect the index number of the account to move [0-$($matching.Length - 1)]"
+                        Write-Host "`nMoving user $($matching[$whichOne].samaccountname)..."
+                        Move-ADObject -Identity $matching[$whichOne] -TargetPath $($using:ou.DistinguishedName)
+                        $cleanUp = Read-Host -Prompt "`nDo you want to delete any of the other found user accounts?`n  WARNING!!! This cannot be undone![y/N]"
+                        if (([string]::Compare($cleanUp, 'y', $True) -eq 0) -or ([string]::Compare($cleanUp, 'yes', $True) -eq 0)) {
+                            $getEm = Read-Host -Prompt "Enter the indeces of the accounts to delete, seperated by spaces"
+                            $getEmArr = $getEm -split "\s+"
+                            $getEmArr | % {
+                                Write-Host "Deleting user $($matching[$_].samaccountname)..."
+                                Remove-ADObject $matching[$_] -Recursive -Confirm:$false
+                            }
+                            Write-Host ""
+                        }
+                    } else {
+                        Write-Host "`nA new user will be created."
+                    }
+                } else {
+                    $in = Read-Host -Prompt "`nDo you want to move this user to $($using:ou.name)?`nSelecting No will create a new user [Y/n]"
+                    if (([string]::Compare($in, 'y', $True) -eq 0) -or ([string]::Compare($in, 'yes', $True) -eq 0) -or ($in -eq "")) {
+                        Write-Host "`nMoving user $($matching[$whichOne].samaccountname)..."
+                        Move-ADObject -Identity $matching[0] -TargetPath $($using:ou.DistinguishedName)
+                    } else {
+                        Write-Host "`nA new user will be created."
+                    }
                 }
             }
+            if (!$matching -or ([string]::Compare($in, 'n', $True) -eq 0) -or ([string]::Compare($in, 'no', $True) -eq 0)) {
 
-            # Create user objects to hold user properties and add to user array
-            $userprops = @{FirstName=$firstname;
-                           MiddleInit=$minitial;
-                           LastName=$lastname;
-                           Username=$username}
-            $user = New-Object psobject -Property $userprops
-            $userobjects += ,$user
-            $i++
+                # Split first name to char array, iterate over it.
+                # For every char in array starting at index 0, concatinate it to last name
+                # check against Get-ADUser to see if username already exists
+                # if it does, add next letter in char array and check again
+                $fninitarray = @()
+                $fnarray = $firstname.ToCharArray()
+                foreach ($letter in $fnarray) {
+                    if ($letter -ne "'") { $fninitarray += ,$letter }
+                    $fninit = -join $fninitarray
+                    $username = -join ($fninit, $($lastname.ToLower().split(" -")[-1] -replace "'",''))
+                    $namecheck = $(Get-ADUser -Filter "samAccountName -like '$username'")
+                    if (StringIsNullOrWhitespace($namecheck)){
+                        $usrarray += ,$username
+                        break
+                    }
+                }
+
+                # Create user objects to hold user properties and add to user array
+                $userprops = @{FirstName=$firstname;
+                            MiddleInit=$minitial;
+                            LastName=$lastname;
+                            Username=$username}
+                $user = New-Object psobject -Property $userprops
+                $userobjects += ,$user
+                $i++
+            }
         }
 
         # Print names and Usernames
         Write-Host ($userobjects | Format-Table FirstName,LastName,MiddleInit,Username -auto | Out-String)
-        $changepw = Read-Host -Prompt "Change password on first login? [y/N]"
 
-        # Create the users
-        $continue = Read-Host -Prompt "`nPress [Enter] to create the accounts, or type [Stop] to abort"
-        if (([string]::Compare($continue, 'stop', $True) -eq 0) -or ([string]::Compare($continue, 's', $True) -eq 0)) {
-            break
-        } elseif ($continue -eq "") {
-            clear
-            Write-Host "Writing users to Active Directory...`n"
-            foreach ($userobj in $userobjects) {
-                $name = $userobj.FirstName + " " + $userobj.LastName
-                if ($userobj.MiddleInit -ne "") {
-                    $displayname =  $userobj.FirstName + " " + $userobj.MiddleInit + " " + $userobj.LastName
-                    } else {
-                        $displayname = $name
+        if ($userobjects) {
+            $changepw = Read-Host -Prompt "Change password on first login? [y/N]"
+
+            # Create the users
+            $continue = Read-Host -Prompt "`nPress [Enter] to create the accounts, or type [Stop] to abort"
+            if (([string]::Compare($continue, 'stop', $True) -eq 0) -or ([string]::Compare($continue, 's', $True) -eq 0)) {
+                break
+            } elseif ($continue -eq "") {
+                clear
+                Write-Host "Writing users to Active Directory...`n"
+                foreach ($userobj in $userobjects) {
+                    $name = $userobj.FirstName + " " + $userobj.LastName
+                    if ($userobj.MiddleInit -ne "") {
+                        $displayname =  $userobj.FirstName + " " + $userobj.MiddleInit + " " + $userobj.LastName
+                        } else {
+                            $displayname = $name
+                        }
+                    if (([string]::Compare($changepw, 'n', $True) -eq 0) -or ([string]::Compare($changepw, 'no', $True) -eq 0) -or ($changepw -eq "")) {
+                        New-ADUser -AccountPassword $using:defaultpw -ChangePasswordAtLogon $False -PasswordNeverExpires $True -DisplayName $displayname -givenName $userobj.FirstName -surName $userobj.LastName -Initials $userobj.MiddleInit -Enabled $true -Name $displayname -samAccountName $userobj.Username -UserPrincipalName "$($userobj.Username)$using:emaildomain" -Path $using:ou.DistinguishedName
+                    } elseif (([string]::Compare($changepw, 'y', $True) -eq 0) -or ([string]::Compare($changepw, 'yes', $True) -eq 0)) {
+                        New-ADUser -AccountPassword $using:defaultpw -ChangePasswordAtLogon $True -PasswordNeverExpires $False -DisplayName $displayname -givenName $userobj.FirstName -surName $userobj.LastName -Initials $userobj.MiddleInit -Enabled $true -Name $displayname -samAccountName $userobj.Username -UserPrincipalName "$($userobj.Username)$using:emaildomain" -Path $using:ou.DistinguishedName
                     }
-                if (([string]::Compare($changepw, 'n', $True) -eq 0) -or ([string]::Compare($changepw, 'no', $True) -eq 0) -or ($changepw -eq "")) {
-                    New-ADUser -AccountPassword $using:defaultpw -ChangePasswordAtLogon $False -PasswordNeverExpires $True -DisplayName $displayname -givenName $userobj.FirstName -surName $userobj.LastName -Initials $userobj.MiddleInit -Enabled $true -Name $displayname -samAccountName $userobj.Username -UserPrincipalName "$($userobj.Username)$using:emaildomain" -Path $using:ou.DistinguishedName
-                } elseif (([string]::Compare($changepw, 'y', $True) -eq 0) -or ([string]::Compare($changepw, 'yes', $True) -eq 0)) {
-                    New-ADUser -AccountPassword $using:defaultpw -ChangePasswordAtLogon $True -PasswordNeverExpires $False -DisplayName $displayname -givenName $userobj.FirstName -surName $userobj.LastName -Initials $userobj.MiddleInit -Enabled $true -Name $displayname -samAccountName $userobj.Username -UserPrincipalName "$($userobj.Username)$using:emaildomain" -Path $using:ou.DistinguishedName
+                    Write-Host "Created user $($userobj.Username) - $($userobj.FirstName) $($userobj.LastName)"
                 }
-                Write-Host "Created user $($userobj.Username) - $($userobj.FirstName) $($userobj.LastName)"
             }
+            
+
+            # Prompt for and create mailboxes
+            $mbox = Read-Host "`n`nDo you want to create mailboxes for these accounts? [y/N]"
+            if (([string]::Compare($mbox, 'y', $True) -eq 0) -or ([string]::Compare($mbox, 'yes', $True) -eq 0)){
+                # Establish remote Exchange Management Shell session and get database stats
+                $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $using:exchangeUri -Authentication Kerberos
+                $dbs = Invoke-Command -Session $Session -Scriptblock {
+                    Get-MailboxDatabase -Status
+                }
+
+                # Get database with most available space
+                # uncomment and use the Where-Object statement to limit DB options
+                $ndbs = $dbs #| Where-Object {$_.Name -match 'EMDB'} | Select Name,AvailableNewMailboxSpace #@{Name='AvailableSpace';Expression={$_.AvailableNewMailboxSpace.ToMb()}}
+                $mostspace = 0
+                $theone = ""
+                $spacegb = @()
+                $ndbs | % {
+                    $spacehold = $_.AvailableNewMailboxSpace -split ' '
+                    if ($spacehold[1] -ne "MB" -and $spacehold[1] -ne "KB") {
+                        $spacegb += @(,($_.Name,([double]$spacehold[0]*1024)))
+                    }
+                }
+                $spacegb | % {
+                    if ($($_[1]) -gt $mostspace) {
+                        $mostspace = $_[1]
+                        $theone = $_[0]
+                    }
+                }
+
+                # Create the mailboxes for each new user
+                foreach ($userobj in $userobjects) {
+                    Write-Output $using:emaildomain -OutVariable lastpart | out-null
+                    $mailuser = "$($userobj.Username)$lastpart"
+                    Invoke-Command -Session $Session -Scriptblock {
+                        Enable-Mailbox $($args[0]) -Database $($args[1])
+                    } -argumentlist $mailuser,$theone
+                }
+
+                Write-Host "`n`n`nMailboxes have been created."
+                Remove-PSSession $Session
+            }
+
+            # Print new user data
+            Write-Host "`n"
+            $allclip = ""
+            if ($movedusers) {
+                $movedclip = "The following EXISTING user accounts have been moved:"
+                Write-Host $movedclip
+                $movedusers | Format-Table name,samaccountname -auto | Out-String -OutVariable subclip
+                $movedclip += $subclip
+                $allclip += $movedclip
+            }
+            $allclip += "The following NEW user accounts have been created:"
+            Write-Host "The following NEW user accounts have been created:"
+            $userobjects | Format-Table FirstName,LastName,MiddleInit,Username -auto | Out-String -outvariable clippy
+            $clippy += "New accounts have the standard new account password`n"
+            Write-Host "New accounts have the standard new account password`n"
+            $allclip += $clippy
+            Write-Host "This output has been copied to your clipboard. Please paste it into the ticket resolution."
+            Write-Host "Select a monospace font like Courier New for proper formatting."
         }
-
-        # Prompt for mailbox creation
-        $mbox = Read-Host "`n`nDo you want to create mailboxes for these accounts? [y/N]"
-        if (([string]::Compare($mbox, 'y', $True) -eq 0) -or ([string]::Compare($action, 'yes', $True) -eq 0)){
-
-            # Edit remote host with your Exchange server. Must have PowerShell sessions with Exchange Management Console forwarding enabled
-            $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://exchangeserver.domain.tld/PowerShell/ -Authentication Kerberos
-            $dbs = Invoke-Command -Session $Session -Scriptblock {
-                Get-MailboxDatabase -Status
-            }
-            $ndbs = $dbs | Where-Object {$_.Name -match 'EMDB'} | Select Name,AvailableNewMailboxSpace
-            $mostspace = 0
-            $theone = ""
-            $spacegb = @()
-            $ndbs | % {
-                $spacehold = $_.AvailableNewMailboxSpace -split ' '
-                if ($spacehold[1] -ne "MB" -and $spacehold[1] -ne "KB") {
-                    $spacegb += @(,($_.Name,([double]$spacehold[0]*1024)))
-                }
-            }
-            $spacegb | % {
-                if ($($_[1]) -gt $mostspace) {
-                    $mostspace = $_[1]
-                    $theone = $_[0]
-                }
-            }
-            foreach ($userobj in $userobjects) {
-
-                # Edit with your domain name
-                $mailuser = $userobj.Username+"@domain.tld"
-                Invoke-Command -Session $Session -Scriptblock {
-                    Enable-Mailbox $($args[0]) -Database $($args[1])
-                } -argumentlist $mailuser,$theone
-            }
-
-            Write-Host "`n`n`nMailboxes have been created."
-
-            Remove-PSSession $Session
-        }
-
-        Write-Host "`n"
-        $userobjects | Format-Table FirstName,LastName,MiddleInit,Username -auto | Out-String -outvariable clippy
-
-        # Edit with your default new account password
-        $clippy += "Passwords are all [default password here]."
-        Write-Host "This table has been copied to your clipboard. Please paste it into the ticket resolution."
-        Write-Host "Select a monospace font like Courier New for proper formatting."
-
     }
 
-    $cliphold = Invoke-Command -Session $s -Scriptblock { $clippy }
+    # Auto-add ouput table to clipboard
+    $cliphold = Invoke-Command -Session $s -Scriptblock { $allclip }
     $cliphold | clip
 
+    # Cleanup remote session
     Remove-PSSession $s
 
 # If deleting
@@ -285,9 +344,8 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
     }
     clear
     try {
-        # Establish remote session to domain controller
-        # DC must have PowerShell remoting enabled
-        $s = New-PSSession -ComputerName domaincontroller.domain.tld -Credential $(Get-Credential -Credential $null)
+        # Establish remote ps session to primary DC
+        $s = New-PSSession -ComputerName $remotedc -Credential $(Get-Credential -Credential $null)
         Invoke-Command -Session $s -Scriptblock {
             Import-Module ActiveDirectory -ErrorAction SilentlyContinue
 
@@ -298,7 +356,7 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                 return ![string]::IsNullOrEmpty($string)
             }
 
-            # Self explanatory
+            # Get estimated last login datetime
             function Get-ADUserLastLogon([string]$userName) {
                 $time = 0
                 $user = Get-ADUser $userName | Get-ADObject -Properties lastLogontimeStamp
@@ -324,9 +382,7 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                         Write-Host "`n`nMultiples of the same name have been found."
                         $repeats = @()
                         $user | % { $j=0 } {
-
-                            # Edit below DC= entries with your domain and tld
-                            $dname = $_.DistinguishedName.replace("CN=$($_.givenName) $($_.Surname),OU=","").replace(",OU=",",").replace(',DC=domain',"").replace(",DC=tld","")
+                            $dname = $_.DistinguishedName.replace("CN=$($_.givenName) $($_.Surname),OU=","").replace(",OU=",",").replace(",DC=$($using:domainname)","").replace(",DC=$($using:tld)","")
                             $dnamearray = $dname -split ","
                             $dname = "/$($dnamearray[$dnamearray.Count..0] -join '/')"
                             $ll = Get-ADUserLastLogon($_.samAccountName)
@@ -347,9 +403,7 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
 
                     # Prepare found user objects for display
                     foreach ($u in $user) {
-
-                        # Edit below DC= entries with your domain and tld
-                        $dname = $u.DistinguishedName.replace("CN=$($u.givenName) $($u.Surname),OU=","").replace(",OU=",",").replace(',DC=domain',"").replace(",DC=tld","")
+                        $dname = $u.DistinguishedName.replace("CN=$($u.givenName) $($u.Surname),OU=","").replace(",OU=",",").replace(",DC=$($using:domainname)","").replace(",DC=$($using:tld)","")
                         $dnamearray = $dname -split ","
                         $dname = "/$($dnamearray[$dnamearray.Count..0] -join '/')"
                         $ll = Get-ADUserLastLogon($u.samAccountName)
@@ -390,15 +444,13 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                 $fixednames | % {$i = $newuserarray.Count} {
                     $currentname = $_
                     $splitname = $_ -split " "
-                    $user = $(Get-ADUser -Filter "(givenName -like '$($splitname[0])') -and (surName -like '$($splitname[1])')" -SearchBase $using:ou.DistinguishedName)
+                    $user = $(Get-ADUser -Filter "(givenName -like '$($splitname[0])') -and (surName -like '$($splitname[1])')" -SearchBase $using:ou.DistinguishedName) #| Select Name,GivenName,Surname,DistinguishedName,samAccountName)
                     if (StringIsNotNullOrWhitespace($user)) {
                         if ($user.Count -gt 0) {
                             Write-Host "`n`nMultiples of the same name have been found."
                             $repeats = @()
                             $user | % { $j=0 } {
-
-                                # Edit below DC= entries with your domain and tld
-                                $dname = $_.DistinguishedName.replace("CN=$($_.givenName) $($_.Surname),OU=","").replace(",OU=",",").replace(',DC=domain',"").replace(",DC=tld","")
+                                $dname = $_.DistinguishedName.replace("CN=$($_.givenName) $($_.Surname),OU=","").replace(",OU=",",").replace(",DC=$($using:domainname)","").replace(",DC=$($using:tld)","")
                                 $dnamearray = $dname -split ","
                                 $dname = "/$($dnamearray[$dnamearray.Count..0] -join '/')"
                                 $ll = Get-ADUserLastLogon($_.samAccountName)
@@ -419,9 +471,7 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
                             }
                         }
                         foreach ($u in $user) {
-
-                            # Edit below DC= entries with your domain and tld
-                            $dname = $u.DistinguishedName.replace("CN=$($u.givenName) $($u.Surname),OU=","").replace(",OU=",",").replace(',DC=domain',"").replace(",DC=tld","")
+                            $dname = $u.DistinguishedName.replace("CN=$($u.givenName) $($u.Surname),OU=","").replace(",OU=",",").replace(",DC=$($using:domainname)","").replace(",DC=$($using:tld)","")
                             $dnamearray = $dname -split ","
                             $dname = "/$($dnamearray[$dnamearray.Count..0] -join '/')"
                             $ll = Get-ADUserLastLogon($u.samAccountName)
@@ -474,7 +524,7 @@ if (([string]::Compare($action, 'a', $True) -eq 0) -or ([string]::Compare($actio
             # Delete that shit
             Write-Host "`n"
             $newuserarray | % {
-                Get-ADUser -Filter "samAccountName -eq '$($_.Account)'" | Remove-ADUser -Confirm:$false
+                Get-ADUser -Filter "samAccountName -eq '$($_.Account)'" | Remove-ADObject -Recursive -Confirm:$false
                 Write-Host "User $($_.Name) has been deleted."
             }
         }
