@@ -49,6 +49,10 @@ Examples:
 * <code>Jenson Button</code> when Jbutton is taken => <code>Jebutton</code>
 * <code>D'angelo Russel</code> when Drussel is taken => <code>Darussel</code>
 
+### Existing user detection ###
+
+Sometimes new-hire account requests get duplicated, which may result in duplicate account creations. The script will check for existing users with the same Firstname and Surname. If one is found, the **name, samaccountname, and AD object location** will be printed to the screen, and you will be prompted with the option to instead move the found user to its new location. Denying the move user prompt will proceed with a new account creation.
+
 ### Repeat name conflicts in user deletion ###
 
 When deleting users, you are first prompted to select the OU the users reside in. The search is recursive, so you may specify higher level OUs, or even the entire domain and search the entire directory. As a result, when listing a common Firstname + Lastname for deletion, the search may return multiple users with the same Firstname + Lastname. When such a conflict is detected, all matching users will be listed and you will be prompted to select the intended deletion target.
